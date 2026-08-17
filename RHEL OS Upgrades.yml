@@ -1,0 +1,172 @@
+- name: "RHEL OS Upgrades With Rollback Snapshot"
+  hosts: Target_Servers
+  gather_facts: true
+  become: true
+  
+  vars_files:
+   - vault.yml #<-- YOUR_VAULT_FILE_HERE
+   
+  vars:
+  
+   vcenter_server: "YOUR_VCENTER_SERVER_HERE"
+   datacenter_name: "YOUR_DATACENTER_HERE"
+   
+   vcenter_user: "{{ vault_vcenter_username }}"
+   vcenter_password: "{{ vault_vcenter_password }}"
+   
+  tasks:
+    - name: "Stage 1: EXECUTE API Call to vCenter for Snapshot"
+      community.vmware.vmware_guest_snapshot:
+        hostname: "{{ vcenter_server }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_password }}"
+        datacenter: "{{ datacenter_name }}"
+        folder: "/{{ datacenter_name }}/vm"
+        name: "{{ inventory_hostname }}"
+        state: present
+        snapshot_name: "OS_Upgrade_Snapshot"
+        description: "Deployed by ___ off Ansible Control Node"
+        validate_certs: false
+      delegate_to: localhost
+      become: false
+      
+    - name: "Pin release to 7.9"
+      ansible.builtin.command: subscription-manager release --set=7.9
+      changed_when: true
+      
+    - name: "Clear yum cache"
+      ansible.builtin.command: yum clean all
+      changed_when: true
+    
+    - name: "Enable Extras on Systems"
+      ansible.builtin.command: subscription-manager repos --enable=rhel-7-server-extras-rpms
+      changed_when: true
+    
+    - name: "Update all packages"
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+    
+    - name: "find newest installed kernel"
+      ansible.builtin.shell: |
+        rpm -q kernel --qf '%{VERSION}-%{RELEASE}\n' | sort -V | tail -1
+      register: newest_kernel
+      changed_when: false
+    
+    - name: "Reboot if not running latest kernel"
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+      when: newest_kernel.stdout not in ansible_kernel
+    
+    - name: "List old kernel-devel packages"
+      ansible.builtin.shell: |
+        rpm -q kernel-devel --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' | sort -V | head -n -1
+      register: old_kernel_devel
+      changed_when: false
+      failed_when: false
+    
+    - name: "remove old kernel-devel"
+      ansible.builtin.yum:
+        name: "{{ old_kernel_devel.stdout_lines }}"
+        state: absent
+      when: old_kernel_devel.stdout_lines | length > 0
+    
+    - name: "Check pata_acpi refcount"
+      ansible.builtin.shell: |
+        lsmod | awk '$1=="pata_acpi" {print $3}'
+      register: pata_refcount
+      changed_when: false
+      failed_when: false
+      
+    - name: "Unload pata_acpi"
+      ansible.builtin.command: modprobe -r pata_acpi
+      when: pata_refcount.stdout | trim == "0"
+      changed_when: true
+    
+    - name: "Blacklist pata_acpi"
+      ansible.builtin.copy:
+        dest: /etc/modprobe.d/pata_acpi.conf
+        content: "blacklist pata_acpi\n"
+        owner: root
+        group: root
+        mode: "0644"
+    
+    - name: "Install Leapp on System"
+      ansible.builtin.yum:
+        name: leapp-upgrade
+        state: present
+    
+    - name: "Check smartcard config"
+      ansible.builtin.command: authconfig --test 
+      register: authconfig_out
+      changed_when: false
+    
+    - name: "Check for non-GDM smartcard references"
+      ansible.builtin.shell: |
+        grep -rl "smartcard-auth" /etc/pam.d/ | grep -v gdm || true
+      register: smartcard_refs
+      changed_when: false
+    
+    - name: "seed leapp answerfile"
+      ansible.builtin.copy:
+        dest: /var/log/leapp/answerfile
+        content: |
+          [remove_pam_pkcs11_module_check]
+          confirm = True
+        owner: root
+        group: root
+        mode: "0644"
+      when:
+       - "'smartcard support is disabled' in authconfig_out.stdout"
+       - smartcard_refs.stdout_lines | length == 0
+    
+    - name: "FLAG - smartcard may be in use"
+      ansible.builtin.fail:
+        msg: "{{ inventory_hostname }}: smartcard auth may be active. Review before proceeding."
+      when: >-
+       'smartcard support is disabled' not in authconfig_out.stdout or smartcard_refs.stdout_lines | length > 0
+    
+    - name: "Preupgrade Check"
+      ansible.builtin.command: leapp preupgrade
+      register: preupgrade
+      changed_when: false
+      failed_when: preupgrade.rc != 0
+      async: 3600
+      poll: 30
+      
+    - name: "Upgrade"
+      ansible.builtin.command: leapp upgrade
+      changed_when: true
+      async: 7200
+      poll: 60
+      
+    - name: "Reboot System"
+      ansible.builtin.shell: "sleep 5 && systemctl reboot"
+      async: 30
+      poll: 0
+      changed_when: true
+      
+    - name: "Wait for SSH to come back"
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host | default(inventory_hostname) }}"
+        port: 22
+        delay: 600
+        timeout: 5400
+        state: started
+      delegate_to: localhost
+      become: false
+        
+    - name: "Re-point Python & re-gather"
+      ansible.builtin.set_fact:
+       ansible_python_interpreter: /usr/libexec/platform-python
+       
+    - name: "Confirm host responds to Ansible"
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+       
+    - name: "Re-gather facts"
+      ansible.builtin.setup:
+      
+    - name: "Confirm RHEL 8 Installation"
+      ansible.builtin.assert:
+        that: ansible_distribution_major_version == "8"
