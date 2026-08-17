@@ -3,7 +3,7 @@ An Ansible Playbook for RHEL OS Upgrades utilizing Leapp. Created for EOL versio
 
 
 Key Points to Note (Questions & Issues):
-  - "Pin release to 7.9" will address any issues with subscription manager trying to talk to an 8.10 release on a 7.9 box.
+  - "Pin release to 7.9" will address any issues with subscription manager trying to talk to an 8.10 release on a 7.9 box (seen in environment).
 
   - This repo will only include the actual yml file to execute the OS upgrades. You will have to create your own directory in which the playbook will live, your own inventory file, and own vault file with ansible-vault encryption (unless you want to go plaintext, then have at it without the vault but I do not recommend that. Especially in today's landscape). Attached below will be the commands to run to set these up.
       ```bash
@@ -20,7 +20,7 @@ Key Points to Note (Questions & Issues):
   
     - CIFS Mounts
     - Smartcard auth
-    - Old kernel devels & a few more.
+    - Old kernel devels
   
   - Prerequisites to run this playbook will include the installation of the following community modules
     - community.vmware
@@ -28,6 +28,9 @@ Key Points to Note (Questions & Issues):
     - ansible.posix
     - community.general
     - community.library_inventory_filtering_v1
-    
+  - You will also need:
+    - Ansible accounts with sudo access on each target machine
+    - SSH key based auth, keys copied to each target machine for passwordless auth. ssh-keygen & ssh-copy-id are your friends.
+  
    
   
