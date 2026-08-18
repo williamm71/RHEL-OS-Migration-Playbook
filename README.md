@@ -18,9 +18,10 @@ Key Points to Note (Questions & Issues):
   - Leapp inhibitors will be environmentally specific, there is no real way to tell what you might run into that'll stop the playbook in it's tracks until
     you let it fail. However, there are a few common inhibitors that I have seen that I have addressed in the playbook. These include:
   
-    - CIFS Mounts
+    - pata_acpi <- Old kernel driver for IDE/PATA storage controllers.
     - Smartcard auth
     - Old kernel devels
+    - NOTE: CIFS/Samba mounts will also produce high risk inhibitors. On target hosts, simply check /etc/fstab to verify none mounted and if they are, comment them out.
   
   - Prerequisites to run this playbook will include the installation of the following community modules
     - community.vmware
