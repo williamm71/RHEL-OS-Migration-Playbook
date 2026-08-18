@@ -1,5 +1,5 @@
 - name: "RHEL OS Upgrades With Rollback Snapshot"
-  hosts: Target_Servers
+  hosts: YOUR_HOST_FILE_HERE # .ini format!
   gather_facts: true
   become: true
   
@@ -26,7 +26,7 @@
         state: present
         snapshot_name: "OS_Upgrade_Snapshot"
         description: "Deployed by ___ off Ansible Control Node"
-        validate_certs: false
+        validate_certs: false # SET TO true if using valid certs!
       delegate_to: localhost
       become: false
       
